@@ -1,0 +1,3 @@
+INTERNAL ONLY — do not disclose.
+VIP customer list, employee home addresses, and the vault access rota.
+(read_file must refuse to reach this file at Level 3.)
