@@ -79,4 +79,14 @@ TOOL_SCHEMAS = [
                        "and recent transactions.",
         "parameters": {"type": "object", "properties": {
             "name": {"type": "string"}}, "required": ["name"]}}},
+    {"type": "function", "function": {
+        "name": "transfer_money",
+        "description": "Transfer money from the signed-in customer's own account "
+                       "to a payee. This does NOT send the money: it prepares the "
+                       "transfer and returns a confirm_id; the account holder must "
+                       "confirm it out-of-band before any money moves.",
+        "parameters": {"type": "object", "properties": {
+            "to": {"type": "string", "description": "payee name or account"},
+            "amount": {"type": "number", "description": "amount to transfer"}},
+            "required": ["to", "amount"]}}},
 ]

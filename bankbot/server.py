@@ -17,6 +17,12 @@ Endpoints:
                         "level": optional, "model": optional}
         response JSON: {"reply": "...", "tool_calls": [...],
                         "conversation_id": "...", "turn_id": "...", "level": N}
+    POST /confirm  -> confirm (and execute) a transfer that transfer_money parked
+        header:  Authorization: Bearer <token>   (must be the owner's own token)
+        request  JSON: {"confirm_id": "..."}
+        response JSON: {"ok": true, "to": "...", "amount": N}  (403 if not the owner)
+        This endpoint is NOT a tool, so the model cannot reach it; the execute
+        switch lives outside the model's control loop.
 
 Identity comes from the token, NOT the request body: the client logs in, the
 server maps the token to a customer_id, and the caller can never assert who it
@@ -37,6 +43,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import agent
 import auth
 import db
+import payments
 
 # Server-wide defaults (set in main()).
 CONFIG = {"level": 1, "model": "qwen2.5:7b"}
@@ -81,8 +88,24 @@ class Handler(BaseHTTPRequestHandler):
             self._do_login()
         elif path == "/chat":
             self._do_chat()
+        elif path == "/confirm":
+            self._do_confirm()
         else:
             self._send(404, {"error": "not found"})
+
+    def _do_confirm(self) -> None:
+        # Confirm (and thereby execute) a transfer that transfer_money parked.
+        # NOT a tool, so the model can never reach this; identity comes from the
+        # caller's OWN login token, exactly like /chat. Possession of a
+        # confirm_id alone is not enough -- the token-resolved caller must match
+        # the customer who parked the transfer.
+        data = self._read_json()
+        if data is None:
+            self._send(400, {"error": "invalid JSON body"})
+            return
+        caller_id = auth.customer_for_token(self._bearer_token())
+        result = payments.confirm(data.get("confirm_id", ""), caller_id)
+        self._send(200 if result.get("ok") else 403, result)
 
     def _do_login(self) -> None:
         data = self._read_json()
@@ -144,7 +167,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
-    ap.add_argument("--level", type=int, default=1, choices=[1, 2, 3])
+    ap.add_argument("--level", type=int, default=1, choices=[1, 2, 3, 4])
     ap.add_argument("--model", default="qwen2.5:7b")
     args = ap.parse_args()
 

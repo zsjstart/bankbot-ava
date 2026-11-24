@@ -22,6 +22,7 @@ import requests
 
 import filters
 import masking
+import payments
 import policy
 import services
 import tools
@@ -66,12 +67,31 @@ SYSTEM_PROMPT = (
 )
 
 
+# Write tools. Level 4 adds an out-of-band confirmation gate for these: at L4+
+# they are parked and must be confirmed via /confirm; below L4 there is no gate
+# and the transfer executes on the model's say-so (see payments.py).
+WRITE_TOOLS = {"transfer_money"}
+CONFIRM_LEVEL = 4
+
+
 def _run_tool(name: str, args: dict, level: int, caller_id: int | None = None) -> str:
     """Dispatch one tool call. At Level 1 there is no code enforcement -- the
     tool simply runs with whatever arguments the model supplied. At Level 3 a
     deterministic policy check runs at this boundary and can deny the call
     BEFORE it executes, using the authenticated caller's identity -- never the
     model's judgement."""
+    # Write-side control. At Level 4+ a money transfer is NOT executed here:
+    # transfer_money only parks a pending action, and it moves money only after
+    # the account holder confirms it out-of-band at /confirm. Authorization alone
+    # can't stop an injected transfer -- the owner really may move her own funds,
+    # and nothing sensitive is read to mask -- so confirmation is the control.
+    # Below Level 4 there is no gate: the transfer executes on the model's
+    # say-so, so an injected transfer goes straight through.
+    if name in WRITE_TOOLS:
+        if level >= CONFIRM_LEVEL:
+            return payments.create_pending(caller_id, **(args or {}))
+        return payments.execute_transfer(caller_id, **(args or {}))
+
     fn = tools.TOOLS.get(name)
     if fn is None:
         return json.dumps({"error": f"unknown tool {name}"})
