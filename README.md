@@ -22,16 +22,17 @@ Four switchable levels, each **building on the one before it**:
   filter has to be designed carefully: if it is too aggressive, it can also suppress
   legitimate replies to properly authorized users.
 
-- **Level 3 — Level 1 + Level 2 + tool-boundary controls.** On top of Levels 1 and 2,
+- **Level 3 — Level 2 + tool-boundary controls.** On top of Levels 1 and 2,
   controls such as **authentication** and **data masking** are enforced at the tool
   boundary, to prevent the agent from making unauthorized tool calls and from disclosing
   sensitive fields it should not return.
 
-- **Level 4 — Level 1–3 + an out-of-band confirmation for writes.** The first three levels
+- **Level 4 — Level 3 + an minimal stand-in for out-of-band confirmation.** The first three levels
   govern *reading* data. A *write* is different: when Ava can move money
   (`transfer_money`), the account holder is genuinely allowed to move their own funds — so
-  authorization passes and there is nothing sensitive to mask. Level 4 adds a confirmation
-  gate: a transfer is **not executed on the model's say-so**; it is parked and only runs
+  authorization passes.
+  
+  Level 4 adds a confirmation gate: a transfer is **not executed on the model's say-so**; it is parked and only runs
   after the account holder confirms it **out-of-band** (a separate `/confirm` endpoint the
   model cannot call). This is what stops a *confused-deputy* write — an instruction
   smuggled into data the agent reads (indirect prompt injection) — from actually moving
