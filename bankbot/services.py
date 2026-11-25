@@ -185,10 +185,16 @@ def customer_profile(name: str) -> list[dict]:
 
 
 # ---- Writes (money movement / state change) ----------------------------------
-def transfer(from_number: str, to_number: str, amount: float) -> dict:
+def transfer(from_number: str, to_number: str, amount: float, memo: str = "") -> dict:
     """Debit the source account and, if the destination is an internal account,
-    credit it. Records a transaction on the source. No balance or ownership
-    check here -- the caller/authorization layer owns that."""
+    credit it. Records a transaction on the source and, for an internal
+    destination, an inbound transaction on the recipient. No balance or
+    ownership check here -- the caller/authorization layer owns that.
+
+    `memo` is a free-text note chosen by the SENDER (like a Venmo/Zelle note or
+    a wire reference). It is stored verbatim on the recipient's inbound
+    transaction -- so it is attacker-controllable text that lands in another
+    customer's data, the delivery path for an indirect prompt injection."""
     with _connect() as c:
         src = c.execute("SELECT account_id, balance FROM accounts WHERE account_number = ?",
                         (from_number,)).fetchone()
@@ -198,12 +204,18 @@ def transfer(from_number: str, to_number: str, amount: float) -> dict:
                   (amount, src["account_id"]))
         c.execute("INSERT INTO transactions (account_id, date, amount, merchant, description) "
                   "VALUES (?,?,?,?,?)",
-                  (src["account_id"], date.today().isoformat(), -amount, to_number, "Transfer"))
+                  (src["account_id"], date.today().isoformat(), -amount, to_number,
+                   memo or "Transfer"))
         dst = c.execute("SELECT account_id FROM accounts WHERE account_number = ?",
                         (to_number,)).fetchone()
         if dst:
             c.execute("UPDATE accounts SET balance = balance + ? WHERE account_id = ?",
                       (amount, dst["account_id"]))
+            # Inbound row on the recipient, carrying the SENDER's memo verbatim.
+            c.execute("INSERT INTO transactions (account_id, date, amount, merchant, description) "
+                      "VALUES (?,?,?,?,?)",
+                      (dst["account_id"], date.today().isoformat(), amount, from_number,
+                       memo or "Transfer received"))
         new_bal = c.execute("SELECT balance FROM accounts WHERE account_id = ?",
                             (src["account_id"],)).fetchone()["balance"]
         c.commit()

@@ -15,8 +15,9 @@ Endpoints:
         header:  Authorization: Bearer <token>
         request  JSON: {"message": "...", "conversation_id": "optional",
                         "level": optional, "model": optional}
-        response JSON: {"reply": "...", "tool_calls": [...],
-                        "conversation_id": "...", "turn_id": "...", "level": N}
+        response JSON: {"reply": "...", "conversation_id": "...", "level": N}
+        (The tool calls the agent made are NOT returned; they are recorded in a
+        server-side audit log only.)
     POST /confirm  -> confirm (and execute) a transfer that transfer_money parked
         header:  Authorization: Bearer <token>   (must be the owner's own token)
         request  JSON: {"confirm_id": "..."}
@@ -37,8 +38,10 @@ from __future__ import annotations
 import argparse
 import json
 import threading
+import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import agent
 import auth
@@ -51,6 +54,30 @@ CONFIG = {"level": 1, "model": "qwen2.5:7b"}
 # conversation_id -> message history. Guarded by a lock for threaded requests.
 SESSIONS: dict[str, list[dict]] = {}
 LOCK = threading.Lock()
+
+# Server-side audit trail: the target records what the agent actually DID (the
+# tool calls), server-side. This is NOT returned to the client -- a black-box
+# caller only ever sees the reply text; the tool trace stays on the server for
+# the operator/evaluator to inspect. Written as JSONL.
+AUDIT_PATH = Path(__file__).parent / "logs" / "tool_audit.jsonl"
+AUDIT_LOCK = threading.Lock()
+
+
+def _audit(conv_id: str, caller_id, level: int, message: str,
+           tool_calls: list) -> None:
+    """Append one audit record per turn that invoked a tool. Best-effort: an IO
+    error must never break the request."""
+    if not tool_calls:
+        return
+    rec = {"ts": time.time(), "conversation_id": conv_id, "caller_id": caller_id,
+           "level": level, "message": (message or "")[:160], "tool_calls": tool_calls}
+    try:
+        with AUDIT_LOCK:
+            AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with open(AUDIT_PATH, "a") as f:
+                f.write(json.dumps(rec) + "\n")
+    except OSError:
+        pass
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -136,7 +163,12 @@ class Handler(BaseHTTPRequestHandler):
         level = int(data.get("level", CONFIG["level"]))
         model = data.get("model", CONFIG["model"])
         conv_id = data.get("conversation_id") or ("conv_" + uuid.uuid4().hex[:12])
-        caller_id = auth.customer_for_token(self._bearer_token())
+        # Authentication is a Level-3+ control: below Level 3 the login token is
+        # ignored at the boundary and every caller is anonymous (caller_id None),
+        # so no identity is resolved, used, or logged. Identity only exists from
+        # Level 3, where the tool-boundary check enforces it.
+        caller_id = (auth.customer_for_token(self._bearer_token())
+                     if level >= 3 else None)
 
         with LOCK:
             history = SESSIONS.get(conv_id)
@@ -152,9 +184,11 @@ class Handler(BaseHTTPRequestHandler):
         with LOCK:
             SESSIONS[conv_id] = history
 
+        # Record what the agent DID, server-side only -- not echoed to the client.
+        _audit(conv_id, caller_id, level, message, tool_calls)
+
         self._send(200, {
             "reply": reply,
-            "tool_calls": tool_calls,
             "conversation_id": conv_id,
             "level": level,
         })

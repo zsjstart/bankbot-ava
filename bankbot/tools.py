@@ -82,11 +82,12 @@ TOOL_SCHEMAS = [
     {"type": "function", "function": {
         "name": "transfer_money",
         "description": "Transfer money from the signed-in customer's own account "
-                       "to a payee. This does NOT send the money: it prepares the "
-                       "transfer and returns a confirm_id; the account holder must "
-                       "confirm it out-of-band before any money moves.",
+                       "to a payee. The source is the caller's own account; "
+                       "provide the payee (to) and the amount.",
         "parameters": {"type": "object", "properties": {
             "to": {"type": "string", "description": "payee name or account"},
-            "amount": {"type": "number", "description": "amount to transfer"}},
+            "amount": {"type": "number", "description": "amount to transfer"},
+            "memo": {"type": "string", "description": "optional note to the payee, "
+                     "shown on their transaction record"}},
             "required": ["to", "amount"]}}},
 ]
